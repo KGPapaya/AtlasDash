@@ -4,7 +4,7 @@ import { LEVELS } from '../levels.js';
 const PLAYER_X = 160;
 const PLAYER_SIZE = 40;
 const GROUND_HEIGHT = 60;
-const JUMP_VELOCITY = -760;
+const JUMP_VELOCITY = -960;
 
 const COLOR_PLAYER = 0x39c5ff;
 const COLOR_GROUND = 0x2a2a33;

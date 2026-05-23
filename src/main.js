@@ -10,7 +10,7 @@ const config = {
   backgroundColor: '#000000',
   physics: {
     default: 'arcade',
-    arcade: { gravity: { y: 2000 }, debug: false },
+    arcade: { gravity: { y: 3200 }, debug: false },
   },
   scene: [BootScene, GameScene],
 };
