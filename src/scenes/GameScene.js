@@ -3,19 +3,29 @@ import { LEVELS } from '../levels.js';
 
 const PLAYER_X = 160;
 const PLAYER_SIZE = 40;
+const HALF = PLAYER_SIZE / 2;
 const GROUND_HEIGHT = 60;
-const JUMP_VELOCITY = -960;
-const GRID = 40; // background grid cell, ~ one Geometry Dash block
-const HITBOX_INSET = 6; // forgiveness per side -> 28x28 lethal box, rotation-independent
-const SPIN_RATE = 600; // degrees/sec while airborne (~one rotation per jump)
 
-// Neon-on-dark palette: cyan = you, magenta = danger.
+// Constant fast scroll. Difficulty comes from obstacle TYPES, not speed.
+const SPEED = 540;
+const GRAVITY = 4300;
+const JUMP_V = -900; // apex ~94px (~2.3 blocks), airtime ~0.42s, jump ~5.7 blocks
+const SPIN_RATE = 600;
+
+const BLOCK = 40; // grid / block unit
+const SPIKE_W = 40;
+const SPIKE_H = 40;
+const LAND_EPS = 8; // tolerance separating a top-landing from a side hit
+
 const COLOR_BG = 0x0b0b16;
 const COLOR_BG_PULSE = 0x141430;
 const COLOR_PLAYER = 0x2ee6ff;
 const COLOR_GROUND = 0x12121c;
 const COLOR_GROUND_LINE = 0x2ee6ff;
 const COLOR_SPIKE = 0xff2e63;
+const COLOR_BLOCK_FILL = 0x1a1a2e;
+const COLOR_BLOCK_LINE = 0xffffff;
+const COLOR_PORTAL = 0x39ff6a;
 const COLOR_GRID = 0x1e2742;
 const COLOR_BAR = 0x2ee6ff;
 const COLOR_BAR_BG = 0x191926;
@@ -28,7 +38,6 @@ export class GameScene extends Phaser.Scene {
   init(data) {
     this.levelIndex = data && typeof data.level === 'number' ? data.level : 0;
     this.cfg = LEVELS[this.levelIndex];
-    // Attempts persist across retries of a level (passed through restart), reset on a new level.
     this.attempts = data && typeof data.attempts === 'number' ? data.attempts : 0;
     this.gameState = 'ready';
     this.distance = 0;
@@ -36,20 +45,26 @@ export class GameScene extends Phaser.Scene {
     this.trails = [];
     this.pointerJustDown = false;
     this.wasGrounded = true;
+    this.grounded = true;
+    this.vy = 0;
+    this.prevBottom = 0;
+    this.portal = null;
+    this.portalSpawned = false;
+    this.lastPatternW = 0;
   }
 
   create() {
     const { width, height } = this.scale;
     this.groundTop = height - GROUND_HEIGHT;
+    this.prevBottom = this.groundTop;
 
     this.bg = this.add.rectangle(0, 0, width, height, COLOR_BG).setOrigin(0, 0).setDepth(-20);
 
-    // Scrolling square grid (texture built once, reused across restarts).
     if (!this.textures.exists('atlas-grid')) {
       const g = this.make.graphics({ x: 0, y: 0, add: false });
       g.lineStyle(1, COLOR_GRID, 1);
-      g.strokeRect(0, 0, GRID, GRID);
-      g.generateTexture('atlas-grid', GRID, GRID);
+      g.strokeRect(0, 0, BLOCK, BLOCK);
+      g.generateTexture('atlas-grid', BLOCK, BLOCK);
       g.destroy();
     }
     this.grid = this.add
@@ -58,7 +73,6 @@ export class GameScene extends Phaser.Scene {
       .setAlpha(0.5)
       .setDepth(-10);
 
-    // Large faint attempt counter behind the action (Geometry Dash staple).
     this.attemptLabel = this.add
       .text(width / 2, this.groundTop * 0.42, '', {
         fontFamily: 'Arial, sans-serif',
@@ -75,27 +89,15 @@ export class GameScene extends Phaser.Scene {
       GROUND_HEIGHT,
       COLOR_GROUND
     );
-    this.physics.add.existing(this.ground, true);
     this.groundLine = this.add.rectangle(width / 2, this.groundTop, width, 4, COLOR_GROUND_LINE);
     this.addGlow(this.groundLine, COLOR_GROUND_LINE, 4);
 
-    this.player = this.add.rectangle(
-      PLAYER_X,
-      this.groundTop - PLAYER_SIZE / 2,
-      PLAYER_SIZE,
-      PLAYER_SIZE,
-      COLOR_PLAYER
-    );
-    this.physics.add.existing(this.player);
-    this.player.body.setCollideWorldBounds(true);
-    this.physics.add.collider(this.player, this.ground);
+    this.player = this.add.rectangle(PLAYER_X, this.groundTop - HALF, PLAYER_SIZE, PLAYER_SIZE, COLOR_PLAYER);
     this.addGlow(this.player, COLOR_PLAYER, 4);
 
-    // HUD: progress track + fill + level label + percent.
     this.add.rectangle(16, 10, width - 32, 6, COLOR_BAR_BG).setOrigin(0, 0).setDepth(5);
     this.progressBar = this.add.rectangle(16, 10, width - 32, 6, COLOR_BAR).setOrigin(0, 0).setDepth(5);
     this.progressBar.scaleX = 0;
-
     this.levelLabel = this.add
       .text(16, 22, '', { fontFamily: 'Arial, sans-serif', fontSize: '18px', color: '#ffffff' })
       .setDepth(5);
@@ -132,10 +134,7 @@ export class GameScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.upKey) ||
       this.pointerJustDown;
     this.pointerJustDown = false;
-
-    // Holding the jump input rejumps on every landing (core GD feel).
-    const holding =
-      this.spaceKey.isDown || this.upKey.isDown || this.input.activePointer.isDown;
+    const holding = this.spaceKey.isDown || this.upKey.isDown || this.input.activePointer.isDown;
 
     this.pulseBackground(time);
 
@@ -151,52 +150,105 @@ export class GameScene extends Phaser.Scene {
   }
 
   advance(delta) {
-    const dx = this.cfg.speed * (delta / 1000);
+    const dt = delta / 1000;
+    const dx = SPEED * dt;
     this.grid.tilePositionX += dx;
     this.spawnTrail();
     this.updateTrails(dx, delta);
 
-    // Fixed, centered hit box so the cube's spin never inflates collisions.
-    const half = (PLAYER_SIZE - HITBOX_INSET * 2) / 2;
-    const pb = new Phaser.Geom.Rectangle(this.player.x - half, this.player.y - half, half * 2, half * 2);
-
+    // Scroll obstacles, reposition their parts, cull off-screen.
     for (let i = this.obstacles.length - 1; i >= 0; i--) {
       const o = this.obstacles[i];
       o.x -= dx;
-      if (o.x + o.width < 0) {
-        o.destroy();
+      for (const part of o.gos) part.go.x = o.x + part.dx;
+      if (o.x + o.w < 0) {
+        for (const part of o.gos) part.go.destroy();
         this.obstacles.splice(i, 1);
-        continue;
       }
-      if (Phaser.Geom.Intersects.RectangleToRectangle(pb, this.spikeHitBox(o))) {
-        this.die();
+    }
+
+    // Scroll the finish portal; reaching the player completes the level.
+    if (this.portal) {
+      this.portal.x -= dx;
+      if (this.portal.x <= PLAYER_X) {
+        this.completeLevel();
         return;
       }
     }
 
+    // Manual kinematic player (gravity + jump arc under our control).
+    this.vy += GRAVITY * dt;
+    this.player.y += this.vy * dt;
+    if (this.player.y < HALF) {
+      this.player.y = HALF;
+      this.vy = 0;
+    }
+    const bottom = this.player.y + HALF;
+
+    // Resolve hazards + figure out the surface under the player this frame.
+    const hurt = this.playerHurtBox();
+    const footL = PLAYER_X - (HALF - 2);
+    const footR = PLAYER_X + (HALF - 2);
+    let supportTop = this.groundTop;
+
+    for (const o of this.obstacles) {
+      if (o.type === 'spike') {
+        if (Phaser.Geom.Intersects.RectangleToRectangle(hurt, this.spikeHitBox(o))) {
+          this.die();
+          return;
+        }
+      } else if (o.type === 'capped') {
+        const box = new Phaser.Geom.Rectangle(o.x + 3, o.top + 3, o.w - 6, o.h - 6);
+        if (Phaser.Geom.Intersects.RectangleToRectangle(hurt, box)) {
+          this.die();
+          return;
+        }
+      } else if (o.type === 'block') {
+        const overlapX = footR > o.x && footL < o.x + o.w;
+        if (overlapX) {
+          if (this.prevBottom <= o.top + LAND_EPS) {
+            supportTop = Math.min(supportTop, o.top); // landing on / riding the top
+          } else {
+            this.die(); // ran into the side
+            return;
+          }
+        }
+      }
+    }
+
+    if (bottom >= supportTop) {
+      this.player.y = supportTop - HALF;
+      this.vy = 0;
+      this.grounded = true;
+    } else {
+      this.grounded = false;
+    }
+    this.prevBottom = this.player.y + HALF;
+
     this.distance += dx;
     this.updateHud();
-    if (this.distance >= this.cfg.goal) this.completeLevel();
+    this.maybeSpawnPortal();
   }
 
-  // Forgiving lethal zone: a narrow box in the lower-center of the spike, so
-  // clearing the apex is safe (matches GD's generous spike hitboxes).
+  playerHurtBox() {
+    const h = HALF - 6; // forgiving 28x28 box, independent of the cube's spin
+    return new Phaser.Geom.Rectangle(this.player.x - h, this.player.y - h, h * 2, h * 2);
+  }
+
+  // Lethal zone is the lower-center of the spike, so clearing the apex is safe.
   spikeHitBox(o) {
-    const w = o.width;
-    const h = o.height;
-    const hitW = Math.min(20, w * 0.5);
-    const hitH = h * 0.55;
-    return new Phaser.Geom.Rectangle(o.x + (w - hitW) / 2, this.groundTop - hitH, hitW, hitH);
+    const hitW = Math.min(20, o.w * 0.5);
+    const hitH = o.h * 0.55;
+    return new Phaser.Geom.Rectangle(o.x + (o.w - hitW) / 2, this.groundTop - hitH, hitW, hitH);
   }
 
   updateSpin(delta) {
-    const grounded = this.player.body.blocked.down;
-    if (!grounded) {
+    if (!this.grounded) {
       this.player.angle += SPIN_RATE * (delta / 1000);
     } else if (!this.wasGrounded) {
       this.player.angle = Math.round(this.player.angle / 90) * 90;
     }
-    this.wasGrounded = grounded;
+    this.wasGrounded = this.grounded;
   }
 
   spawnTrail() {
@@ -234,8 +286,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   tryJump() {
-    if (this.player.body.blocked.down) {
-      this.player.body.setVelocityY(JUMP_VELOCITY);
+    if (this.grounded) {
+      this.vy = JUMP_V;
+      this.grounded = false;
     }
   }
 
@@ -254,6 +307,8 @@ export class GameScene extends Phaser.Scene {
   startRun() {
     this.gameState = 'running';
     this.distance = 0;
+    this.vy = 0;
+    this.grounded = true;
     this.attempts += 1;
     this.attemptLabel.setText('Attempt ' + this.attempts);
     this.hideBanner();
@@ -261,34 +316,116 @@ export class GameScene extends Phaser.Scene {
   }
 
   scheduleNextSpawn() {
-    const delay = Phaser.Math.Between(this.cfg.spawnMin, this.cfg.spawnMax);
-    this.time.delayedCall(delay, () => {
-      if (this.gameState !== 'running') return;
-      this.spawnObstacle();
+    const gap = Phaser.Math.Between(this.cfg.gapMin, this.cfg.gapMax);
+    const delay = ((this.lastPatternW + gap) / SPEED) * 1000;
+    this.spawnTimer = this.time.delayedCall(delay, () => {
+      if (this.gameState !== 'running' || this.portalSpawned) return;
+      this.lastPatternW = this.spawnPattern(Phaser.Utils.Array.GetRandom(this.cfg.patterns));
       this.scheduleNextSpawn();
     });
   }
 
-  spawnObstacle() {
-    const h = Phaser.Math.Between(this.cfg.minH, this.cfg.maxH);
-    const w = Phaser.Math.Clamp(Math.round(h * 0.75), 28, 64);
+  spawnPattern(key) {
     const x = this.scale.width + 20;
-    const spike = this.add
-      .triangle(x, this.groundTop - h, 0, h, w, h, w / 2, 0, COLOR_SPIKE)
+    if (key === 'spike1') {
+      this.addSpike(x);
+      return SPIKE_W;
+    }
+    if (key === 'spike2') {
+      this.addSpike(x);
+      this.addSpike(x + SPIKE_W);
+      return SPIKE_W * 2;
+    }
+    if (key === 'spike3') {
+      this.addSpike(x);
+      this.addSpike(x + SPIKE_W);
+      this.addSpike(x + SPIKE_W * 2);
+      return SPIKE_W * 3;
+    }
+    if (key === 'block') {
+      this.addBlock(x, 80, BLOCK);
+      return 80;
+    }
+    if (key === 'capped') {
+      this.addCapped(x);
+      return BLOCK;
+    }
+    if (key === 'blockSpike') {
+      this.addBlock(x, 80, BLOCK);
+      this.addSpike(x + 80 + 120);
+      return 80 + 120 + SPIKE_W;
+    }
+    this.addSpike(x);
+    return SPIKE_W;
+  }
+
+  addSpike(x, h = SPIKE_H) {
+    const w = SPIKE_W;
+    const tri = this.add.triangle(x, this.groundTop - h, 0, h, w, h, w / 2, 0, COLOR_SPIKE).setOrigin(0, 0);
+    this.addGlow(tri, COLOR_SPIKE, 3);
+    this.obstacles.push({ type: 'spike', x, w, h, top: this.groundTop - h, gos: [{ go: tri, dx: 0 }] });
+  }
+
+  addBlock(x, w, h) {
+    const top = this.groundTop - h;
+    const rect = this.add.rectangle(x, top, w, h, COLOR_BLOCK_FILL).setOrigin(0, 0);
+    rect.setStrokeStyle(2, COLOR_BLOCK_LINE, 1);
+    this.addGlow(rect, COLOR_BLOCK_LINE, 2);
+    this.obstacles.push({ type: 'block', x, w, h, top, gos: [{ go: rect, dx: 0 }] });
+  }
+
+  addCapped(x) {
+    const blockH = BLOCK;
+    const spikeH = 14;
+    const w = BLOCK;
+    const totalH = blockH + spikeH;
+    const top = this.groundTop - totalH;
+    const rect = this.add.rectangle(x, this.groundTop - blockH, w, blockH, COLOR_BLOCK_FILL).setOrigin(0, 0);
+    rect.setStrokeStyle(2, COLOR_SPIKE, 1);
+    const s1 = this.add
+      .triangle(x, top, 0, spikeH, w / 2, spikeH, w / 4, 0, COLOR_SPIKE)
       .setOrigin(0, 0);
-    this.addGlow(spike, COLOR_SPIKE, 3);
-    this.obstacles.push(spike);
+    const s2 = this.add
+      .triangle(x + w / 2, top, 0, spikeH, w / 2, spikeH, w / 4, 0, COLOR_SPIKE)
+      .setOrigin(0, 0);
+    this.addGlow(rect, COLOR_SPIKE, 2);
+    this.obstacles.push({
+      type: 'capped',
+      x,
+      w,
+      h: totalH,
+      top,
+      gos: [{ go: rect, dx: 0 }, { go: s1, dx: 0 }, { go: s2, dx: w / 2 }],
+    });
+  }
+
+  maybeSpawnPortal() {
+    if (this.portalSpawned) return;
+    const remaining = this.cfg.goal - this.distance;
+    if (remaining <= this.scale.width - PLAYER_X) {
+      this.portalSpawned = true;
+      this.spawnPortal(PLAYER_X + remaining); // reaches PLAYER_X exactly at the goal
+      if (this.spawnTimer) this.spawnTimer.remove(false);
+    }
+  }
+
+  spawnPortal(x) {
+    const h = this.groundTop * 0.86;
+    const gate = this.add.rectangle(x, this.groundTop, 26, h, COLOR_PORTAL, 0.18).setOrigin(0.5, 1);
+    gate.setStrokeStyle(3, COLOR_PORTAL, 1);
+    this.addGlow(gate, COLOR_PORTAL, 6);
+    this.portal = gate;
   }
 
   die() {
     this.gameState = 'dead';
-    this.player.body.setVelocity(0, 0);
+    this.vy = 0;
     this.cameras.main.shake(250, 0.012);
     this.showBanner('Game Over\n' + this.cfg.name + '\nPress Space or Tap to retry');
   }
 
   completeLevel() {
-    this.player.body.setVelocity(0, 0);
+    this.vy = 0;
     if (this.levelIndex + 1 < LEVELS.length) {
       this.gameState = 'complete';
       this.showBanner(this.cfg.name + ' complete\nPress Space or Tap to continue');

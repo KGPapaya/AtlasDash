@@ -8,10 +8,6 @@ const config = {
   width: 960,
   height: 540,
   backgroundColor: '#0b0b16',
-  physics: {
-    default: 'arcade',
-    arcade: { gravity: { y: 3200 }, debug: false },
-  },
   scene: [BootScene, GameScene],
 };
 
