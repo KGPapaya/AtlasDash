@@ -120,16 +120,25 @@ export class GameScene extends Phaser.Scene {
 
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.upKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
-    this.input.keyboard.addCapture('SPACE,UP');
+    this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.menuKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this.input.keyboard.addCapture('SPACE,UP,ESC,M');
     this.input.on('pointerdown', () => {
       this.pointerJustDown = true;
     });
 
     this.updateHud();
-    this.showBanner(this.cfg.name + '\nPress Space or Tap to start');
+    this.showBanner(this.cfg.name + '\nPress Space or Tap to start\nEsc for menu');
   }
 
   update(time, delta) {
+    if (
+      Phaser.Input.Keyboard.JustDown(this.escKey) ||
+      Phaser.Input.Keyboard.JustDown(this.menuKey)
+    ) {
+      this.scene.start('MenuScene');
+      return;
+    }
     const justPressed =
       Phaser.Input.Keyboard.JustDown(this.spaceKey) ||
       Phaser.Input.Keyboard.JustDown(this.upKey) ||
@@ -428,19 +437,19 @@ export class GameScene extends Phaser.Scene {
     this.gameState = 'dead';
     this.vy = 0;
     this.cameras.main.shake(250, 0.012);
-    this.showBanner('Game Over\n' + this.cfg.name + '\nPress Space or Tap to retry');
+    this.showBanner('Game Over\n' + this.cfg.name + '\nPress Space or Tap to retry\nEsc for menu');
   }
 
   completeLevel() {
     this.vy = 0;
     if (this.levelIndex + 1 < LEVELS.length) {
       this.gameState = 'complete';
-      this.showBanner(this.cfg.name + ' complete\nPress Space or Tap to continue');
+      this.showBanner(this.cfg.name + ' complete\nPress Space or Tap to continue\nEsc for menu');
     } else {
       this.gameState = 'won';
       this.progressBar.scaleX = 1;
       this.percentLabel.setText('100%');
-      this.showBanner('AtlasDash complete\nYou cleared every level\nPress Space or Tap to play again');
+      this.showBanner('AtlasDash complete\nYou cleared every level\nPress Space or Tap to play again\nEsc for menu');
     }
   }
 
