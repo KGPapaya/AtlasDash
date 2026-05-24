@@ -7,7 +7,7 @@ const HALF = PLAYER_SIZE / 2;
 const GROUND_HEIGHT = 60;
 
 // Constant fast scroll. Difficulty comes from obstacle TYPES, not speed.
-const SPEED = 540;
+const SPEED = 620;
 const GRAVITY = 4300;
 const JUMP_V = -900; // apex ~94px (~2.3 blocks), airtime ~0.42s, jump ~5.7 blocks
 const SPIN_RATE = 600;
@@ -57,6 +57,7 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.scale;
     this.groundTop = height - GROUND_HEIGHT;
     this.prevBottom = this.groundTop;
+    this.accent = this.cfg.accent || COLOR_BAR;
 
     this.bg = this.add.rectangle(0, 0, width, height, COLOR_BG).setOrigin(0, 0).setDepth(-20);
 
@@ -89,14 +90,14 @@ export class GameScene extends Phaser.Scene {
       GROUND_HEIGHT,
       COLOR_GROUND
     );
-    this.groundLine = this.add.rectangle(width / 2, this.groundTop, width, 4, COLOR_GROUND_LINE);
-    this.addGlow(this.groundLine, COLOR_GROUND_LINE, 4);
+    this.groundLine = this.add.rectangle(width / 2, this.groundTop, width, 4, this.accent);
+    this.addGlow(this.groundLine, this.accent, 4);
 
     this.player = this.add.rectangle(PLAYER_X, this.groundTop - HALF, PLAYER_SIZE, PLAYER_SIZE, COLOR_PLAYER);
     this.addGlow(this.player, COLOR_PLAYER, 4);
 
     this.add.rectangle(16, 10, width - 32, 6, COLOR_BAR_BG).setOrigin(0, 0).setDepth(5);
-    this.progressBar = this.add.rectangle(16, 10, width - 32, 6, COLOR_BAR).setOrigin(0, 0).setDepth(5);
+    this.progressBar = this.add.rectangle(16, 10, width - 32, 6, this.accent).setOrigin(0, 0).setDepth(5);
     this.progressBar.scaleX = 0;
     this.levelLabel = this.add
       .text(16, 22, '', { fontFamily: 'Arial, sans-serif', fontSize: '18px', color: '#ffffff' })
@@ -343,12 +344,19 @@ export class GameScene extends Phaser.Scene {
       return SPIKE_W * 3;
     }
     if (key === 'block') {
-      this.addBlock(x, 80, BLOCK);
-      return 80;
+      const bw = Phaser.Math.Between(60, 140);
+      this.addBlock(x, bw, BLOCK);
+      return bw;
     }
     if (key === 'capped') {
-      this.addCapped(x);
+      this.addCapped(x, BLOCK, 14); // short, clearable from the ground
       return BLOCK;
+    }
+    if (key === 'blockCapped') {
+      // Platform then a tall spiked block: only clearable by jumping off the block.
+      this.addBlock(x, 80, BLOCK);
+      this.addCapped(x + 160, 80, 24);
+      return 160 + BLOCK;
     }
     if (key === 'blockSpike') {
       this.addBlock(x, 80, BLOCK);
@@ -374,9 +382,7 @@ export class GameScene extends Phaser.Scene {
     this.obstacles.push({ type: 'block', x, w, h, top, gos: [{ go: rect, dx: 0 }] });
   }
 
-  addCapped(x) {
-    const blockH = BLOCK;
-    const spikeH = 14;
+  addCapped(x, blockH, spikeH) {
     const w = BLOCK;
     const totalH = blockH + spikeH;
     const top = this.groundTop - totalH;
