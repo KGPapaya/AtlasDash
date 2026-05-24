@@ -135,14 +135,15 @@ export class GameScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.upKey) ||
       this.pointerJustDown;
     this.pointerJustDown = false;
-    const holding = this.spaceKey.isDown || this.upKey.isDown || this.input.activePointer.isDown;
 
     this.pulseBackground(time);
 
     if (this.gameState === 'running') {
       this.advance(delta);
+      // Deliberate tap-to-jump: each press is one jump (no auto-bounce while held),
+      // so running into a wall without jumping is a real crash.
       if (this.gameState === 'running') {
-        if (holding) this.tryJump();
+        if (justPressed) this.tryJump();
         this.updateSpin(delta);
       }
     } else if (justPressed) {
@@ -151,7 +152,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   advance(delta) {
-    const dt = delta / 1000;
+    const dt = Math.min(delta, 40) / 1000; // clamp so a frame hitch can't tunnel obstacles
     const dx = SPEED * dt;
     this.grid.tilePositionX += dx;
     this.spawnTrail();
