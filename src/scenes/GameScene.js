@@ -135,15 +135,15 @@ export class GameScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.upKey) ||
       this.pointerJustDown;
     this.pointerJustDown = false;
+    const holding = this.spaceKey.isDown || this.upKey.isDown || this.input.activePointer.isDown;
 
     this.pulseBackground(time);
 
     if (this.gameState === 'running') {
       this.advance(delta);
-      // Deliberate tap-to-jump: each press is one jump (no auto-bounce while held),
-      // so running into a wall without jumping is a real crash.
+      // Hold-to-jump: holding rejumps on every landing (core Geometry Dash feel).
       if (this.gameState === 'running') {
-        if (justPressed) this.tryJump();
+        if (holding) this.tryJump();
         this.updateSpin(delta);
       }
     } else if (justPressed) {
