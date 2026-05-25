@@ -17,4 +17,7 @@ export const LEVELS = [
   { name: 'Level 8', accent: 0xffc400, patterns: ['spike3', 'spike3', 'block', 'capped', 'blockSpike', 'blockCapped', 'blockCapped', 'platform', 'highPlatform', 'ceiling', 'ceiling'], gapMin: 300, gapMax: 400, goal: 16200 },
   { name: 'Level 9', accent: 0xff5722, patterns: ['spike3', 'spike3', 'block', 'capped', 'blockSpike', 'blockCapped', 'blockCapped', 'blockCapped', 'highPlatform', 'ceiling', 'ceiling'], gapMin: 285, gapMax: 380, goal: 17800 },
   { name: 'Level 10', accent: 0xff0048, patterns: ['spike3', 'spike3', 'blockCapped', 'blockCapped', 'blockCapped', 'block', 'capped', 'blockSpike', 'highPlatform', 'ceiling', 'ceiling', 'platform'], gapMin: 270, gapMax: 360, goal: 19600 },
+  { name: 'Level 11', accent: 0xae00ff, patterns: ['spike3', 'blockCapped', 'capped', 'block', 'blockSpike', 'platform', 'highPlatform', 'ceiling', 'orbGap', 'padWall'], gapMin: 268, gapMax: 358, goal: 21000 },
+  { name: 'Level 12', accent: 0x00ffc8, patterns: ['spike3', 'spike3', 'blockCapped', 'blockCapped', 'capped', 'blockSpike', 'highPlatform', 'ceiling', 'ceiling', 'orbGap', 'padWall'], gapMin: 258, gapMax: 350, goal: 22500 },
+  { name: 'Level 13', accent: 0xff5e00, patterns: ['spike3', 'spike3', 'blockCapped', 'blockCapped', 'capped', 'ceiling', 'ceiling', 'highPlatform', 'orbGap', 'orbGap', 'padWall'], gapMin: 248, gapMax: 342, goal: 24000 },
 ];

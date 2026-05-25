@@ -27,6 +27,12 @@ const PLAT_HIGH = 108; // high platform top = groundTop - 108 (step-reachable on
 const PLAT_T = 18; // platform slab thickness
 const CEIL_CLEAR = 70; // safe run-lane height beneath a ceiling section
 
+// "Logic to pass" set-pieces: a jump orb gives a mid-air second jump (the only
+// way across a wide spike pit); a jump pad super-launches you (the only way over
+// a tall wall). PAD_V is tuned so a pad launch clears a wall a normal jump cannot.
+const PAD_V = -1240; // jump-pad launch velocity (apex well above a normal jump)
+const ORB_R = 28; // jump-orb activation radius (generous)
+
 const COLOR_BG = 0x0b0b16;
 const COLOR_BG_PULSE = 0x141430;
 const COLOR_PLAYER = 0x2ee6ff;
@@ -36,6 +42,8 @@ const COLOR_SPIKE = 0xff2e63;
 const COLOR_BLOCK_FILL = 0x1a1a2e;
 const COLOR_BLOCK_LINE = 0xffffff;
 const COLOR_PORTAL = 0x39ff6a;
+const COLOR_ORB = 0xffe14d;
+const COLOR_PAD = 0xff7ad9;
 const COLOR_GRID = 0x1e2742;
 const COLOR_BAR = 0x2ee6ff;
 const COLOR_BAR_BG = 0x191926;
@@ -162,6 +170,8 @@ export class GameScene extends Phaser.Scene {
       this.advance(delta);
       // Hold-to-jump: holding rejumps on every landing (core Geometry Dash feel).
       if (this.gameState === 'running') {
+        this.tryPads();
+        this.tryOrbs(justPressed || holding);
         if (holding) this.tryJump();
         this.updateSpin(delta);
       }
@@ -418,6 +428,21 @@ export class GameScene extends Phaser.Scene {
       this.addCeiling(x, cw);
       return cw;
     }
+    if (key === 'orbGap') {
+      // A spike pit too wide for one jump. Logic: jump, tap the orb mid-air for a
+      // second jump, clear the rest. No orb, no crossing.
+      const n = 9;
+      for (let i = 0; i < n; i++) this.addSpike(x + i * SPIKE_W);
+      this.addOrb(x + 170, this.groundTop - 95);
+      return n * SPIKE_W;
+    }
+    if (key === 'padWall') {
+      // A wall too tall to jump. Logic: stay grounded onto the pad, get launched
+      // over it. Bounce past the pad and you smack the wall.
+      this.addPad(x, 64);
+      this.addCapped(x + 200, 110, 20);
+      return 240;
+    }
     this.addSpike(x);
     return SPIKE_W;
   }
@@ -485,6 +510,56 @@ export class GameScene extends Phaser.Scene {
       gos.push({ go: tooth, dx: i * step });
     }
     this.obstacles.push({ type: 'ceiling', x, w, h: lethalBottom, top: 0, lethalBottom, gos });
+  }
+
+  addOrb(ox, oy) {
+    const c = this.add.circle(ox, oy, ORB_R, COLOR_ORB, 0.22);
+    c.setStrokeStyle(3, COLOR_ORB, 1);
+    this.addGlow(c, COLOR_ORB, 4);
+    this.obstacles.push({ type: 'orb', x: ox - ORB_R, w: ORB_R * 2, top: oy - ORB_R, used: false, gos: [{ go: c, dx: ORB_R }] });
+  }
+
+  addPad(x, w) {
+    const h = 12;
+    const top = this.groundTop - h;
+    const rect = this.add.rectangle(x, top, w, h, COLOR_PAD).setOrigin(0, 0);
+    this.addGlow(rect, COLOR_PAD, 5);
+    this.obstacles.push({ type: 'pad', x, w, top, h, used: false, gos: [{ go: rect, dx: 0 }] });
+  }
+
+  // Jump orb: a jump input while overlapping gives one mid-air jump per pass.
+  tryOrbs(jumpInput) {
+    const hurt = this.playerHurtBox();
+    for (const o of this.obstacles) {
+      if (o.type !== 'orb') continue;
+      const box = new Phaser.Geom.Rectangle(o.x, o.top, o.w, o.w);
+      const over = Phaser.Geom.Intersects.RectangleToRectangle(hurt, box);
+      if (over && jumpInput && !o.used) {
+        this.vy = JUMP_V;
+        this.grounded = false;
+        o.used = true;
+      } else if (!over) {
+        o.used = false;
+      }
+    }
+  }
+
+  // Jump pad: touching one while grounded super-launches you, no input needed.
+  tryPads() {
+    const footL = PLAYER_X - (HALF - 2);
+    const footR = PLAYER_X + (HALF - 2);
+    const onGround = this.player.y + HALF >= this.groundTop - 16;
+    for (const o of this.obstacles) {
+      if (o.type !== 'pad') continue;
+      const overlapX = footR > o.x && footL < o.x + o.w;
+      if (overlapX && onGround && !o.used) {
+        this.vy = PAD_V;
+        this.grounded = false;
+        o.used = true;
+      } else if (!overlapX) {
+        o.used = false;
+      }
+    }
   }
 
   maybeSpawnPortal() {
