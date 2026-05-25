@@ -17,6 +17,16 @@ const SPIKE_W = 40;
 const SPIKE_H = 40;
 const LAND_EPS = 8; // tolerance separating a top-landing from a side hit
 
+// Vertical play: ride platforms (jump onto and run along) + ceiling hazards.
+// Tuned to the measured jump arc: apex ~87px above the takeoff surface at 60fps,
+// so the player's bottom reaches groundTop-87 from flat ground. PLAT_LOW clears
+// that with margin (reachable from the ground); PLAT_HIGH does not (needs a step).
+// CEIL_CLEAR leaves a ground lane that only a grounded (non-jumping) player fits.
+const PLAT_LOW = 72; // standalone platform top = groundTop - 72 (ground-reachable)
+const PLAT_HIGH = 108; // high platform top = groundTop - 108 (step-reachable only)
+const PLAT_T = 18; // platform slab thickness
+const CEIL_CLEAR = 70; // safe run-lane height beneath a ceiling section
+
 const COLOR_BG = 0x0b0b16;
 const COLOR_BG_PULSE = 0x141430;
 const COLOR_PLAYER = 0x2ee6ff;
@@ -224,6 +234,23 @@ export class GameScene extends Phaser.Scene {
             return;
           }
         }
+      } else if (o.type === 'platform') {
+        const overlapX = footR > o.x && footL < o.x + o.w;
+        if (overlapX) {
+          if (this.prevBottom <= o.top + LAND_EPS) {
+            supportTop = Math.min(supportTop, o.top); // land on / ride the platform
+          } else if (hurt.bottom > o.top && hurt.top < o.top + o.h) {
+            this.die(); // hit the side or underside
+            return;
+          }
+          // otherwise the player passes safely underneath
+        }
+      } else if (o.type === 'ceiling') {
+        const cr = new Phaser.Geom.Rectangle(o.x, 0, o.w, o.lethalBottom);
+        if (Phaser.Geom.Intersects.RectangleToRectangle(hurt, cr)) {
+          this.die();
+          return;
+        }
       }
     }
 
@@ -373,6 +400,24 @@ export class GameScene extends Phaser.Scene {
       this.addSpike(x + 80 + 120);
       return 80 + 120 + SPIKE_W;
     }
+    if (key === 'platform') {
+      // Low floating platform: jump on, ride at height, drop off (elevation change).
+      const bw = Phaser.Math.Between(150, 200);
+      this.addPlatform(x, bw, PLAT_LOW);
+      return bw;
+    }
+    if (key === 'highPlatform') {
+      // A ground step, then a high platform you can only reach by jumping off it.
+      this.addBlock(x, 80, BLOCK);
+      this.addPlatform(x + 160, 160, PLAT_HIGH);
+      return 320;
+    }
+    if (key === 'ceiling') {
+      // Downward spikes from the top: pass under by staying grounded (no jumping).
+      const cw = Phaser.Math.Between(240, 300);
+      this.addCeiling(x, cw);
+      return cw;
+    }
     this.addSpike(x);
     return SPIKE_W;
   }
@@ -413,6 +458,33 @@ export class GameScene extends Phaser.Scene {
       top,
       gos: [{ go: rect, dx: 0 }, { go: s1, dx: 0 }, { go: s2, dx: w / 2 }],
     });
+  }
+
+  addPlatform(x, w, hAbove) {
+    const top = this.groundTop - hAbove;
+    const rect = this.add.rectangle(x, top, w, PLAT_T, COLOR_BLOCK_FILL).setOrigin(0, 0);
+    rect.setStrokeStyle(2, COLOR_BLOCK_LINE, 1);
+    this.addGlow(rect, COLOR_BLOCK_LINE, 2);
+    this.obstacles.push({ type: 'platform', x, w, h: PLAT_T, top, gos: [{ go: rect, dx: 0 }] });
+  }
+
+  addCeiling(x, w) {
+    const lethalBottom = this.groundTop - CEIL_CLEAR;
+    const teethH = 26;
+    const bodyH = lethalBottom - teethH;
+    const body = this.add.rectangle(x, 0, w, bodyH, COLOR_BLOCK_FILL).setOrigin(0, 0);
+    body.setStrokeStyle(2, COLOR_SPIKE, 0.9);
+    this.addGlow(body, COLOR_SPIKE, 2);
+    const gos = [{ go: body, dx: 0 }];
+    const n = Math.max(1, Math.round(w / 30));
+    const step = w / n;
+    for (let i = 0; i < n; i++) {
+      const tooth = this.add
+        .triangle(x + i * step, bodyH, 0, 0, step, 0, step / 2, teethH, COLOR_SPIKE)
+        .setOrigin(0, 0);
+      gos.push({ go: tooth, dx: i * step });
+    }
+    this.obstacles.push({ type: 'ceiling', x, w, h: lethalBottom, top: 0, lethalBottom, gos });
   }
 
   maybeSpawnPortal() {
