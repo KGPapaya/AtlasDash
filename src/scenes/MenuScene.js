@@ -2,17 +2,15 @@
 import { LEVELS } from '../levels.js';
 
 const COLOR_BG = 0x0b0b16;
-const COLOR_BG_PULSE = 0x141430;
-const COLOR_GRID = 0x1e2742;
 const COLOR_TITLE = 0x2ee6ff;
 const BLOCK = 40;
 
 const COLS = 5;
 const CARD_W = 150;
-const CARD_H = 110;
-const GAP_X = 24;
-const GAP_Y = 36;
-const GRID_TOP = 175;
+const CARD_H = 66;
+const GAP_X = 20;
+const GAP_Y = 16;
+const GRID_TOP = 150;
 
 export class MenuScene extends Phaser.Scene {
   constructor() {
@@ -25,20 +23,33 @@ export class MenuScene extends Phaser.Scene {
     this.selIndex = 0;
     this.cards = [];
 
-    this.bg = this.add.rectangle(0, 0, width, height, COLOR_BG).setOrigin(0, 0).setDepth(-20);
+    const sky = this.add.graphics().setDepth(-30);
+    const mid = mix(0x150b2e, COLOR_TITLE, 0.1);
+    sky.fillGradientStyle(COLOR_BG, COLOR_BG, mid, mid, 1);
+    sky.fillRect(0, 0, width, Math.round(height * 0.5));
+    sky.fillGradientStyle(mid, mid, 0x09060f, 0x09060f, 1);
+    sky.fillRect(0, Math.round(height * 0.5), width, height);
 
-    if (!this.textures.exists('atlas-grid')) {
+    const gridKey = 'atlas-grid-w';
+    if (!this.textures.exists(gridKey)) {
       const g = this.make.graphics({ x: 0, y: 0, add: false });
-      g.lineStyle(1, COLOR_GRID, 1);
+      g.lineStyle(1, 0xffffff, 1);
       g.strokeRect(0, 0, BLOCK, BLOCK);
-      g.generateTexture('atlas-grid', BLOCK, BLOCK);
+      g.generateTexture(gridKey, BLOCK, BLOCK);
       g.destroy();
     }
     this.grid = this.add
-      .tileSprite(0, 0, width, height, 'atlas-grid')
+      .tileSprite(0, 0, width, height, gridKey)
       .setOrigin(0, 0)
-      .setAlpha(0.4)
+      .setAlpha(0.12)
       .setDepth(-10);
+    this.grid.setTint(COLOR_TITLE);
+
+    this.pulseOverlay = this.add
+      .rectangle(0, 0, width, height, COLOR_TITLE, 0)
+      .setOrigin(0, 0)
+      .setDepth(-25);
+    this.applyCameraFx();
 
     const title = this.add
       .text(width / 2, 64, 'ATLASDASH', {
@@ -68,21 +79,21 @@ export class MenuScene extends Phaser.Scene {
       const cy = GRID_TOP + CARD_H / 2 + r * (CARD_H + GAP_Y);
       const accent = LEVELS[i].accent;
 
-      const fill = this.add.rectangle(cx, cy, CARD_W, CARD_H, accent, 0.08);
+      const fill = this.add.rectangle(cx, cy, CARD_W, CARD_H, accent, 0.1);
       fill.setStrokeStyle(2, accent, 0.9);
       this.addGlow(fill, accent, 2);
 
       const label = this.add
-        .text(cx, cy - 24, 'LEVEL', {
+        .text(cx, cy - 16, 'LEVEL', {
           fontFamily: 'Arial, sans-serif',
-          fontSize: '13px',
-          color: '#8a9ab8',
+          fontSize: '10px',
+          color: '#9fb0d0',
         })
         .setOrigin(0.5);
       const num = this.add
-        .text(cx, cy + 12, String(i + 1), {
+        .text(cx, cy + 9, String(i + 1), {
           fontFamily: 'Arial, sans-serif',
-          fontSize: '44px',
+          fontSize: '28px',
           color: hexColor(accent),
           fontStyle: 'bold',
         })
@@ -159,13 +170,20 @@ export class MenuScene extends Phaser.Scene {
 
   update(time) {
     const p = 0.5 + 0.5 * Math.sin((time / 1000) * Math.PI * 2 * (130 / 60));
-    const a = COLOR_BG;
-    const b = COLOR_BG_PULSE;
-    const r = Math.round(((a >> 16) & 255) + (((b >> 16) & 255) - ((a >> 16) & 255)) * p);
-    const g = Math.round(((a >> 8) & 255) + (((b >> 8) & 255) - ((a >> 8) & 255)) * p);
-    const bl = Math.round((a & 255) + ((b & 255) - (a & 255)) * p);
-    this.bg.fillColor = (r << 16) | (g << 8) | bl;
+    if (this.pulseOverlay) this.pulseOverlay.alpha = 0.05 * p;
     this.grid.tilePositionX += 0.6;
+  }
+
+  applyCameraFx() {
+    try {
+      const cam = this.cameras.main;
+      if (!cam.postFX) return;
+      if (cam.postFX.addBloom) cam.postFX.addBloom(0xffffff, 1, 1, 1.1, 0.6, 4);
+      if (cam.postFX.addVignette) cam.postFX.addVignette(0.5, 0.5, 0.82, 0.35);
+      if (cam.postFX.addColorMatrix) cam.postFX.addColorMatrix().saturate(0.18);
+    } catch (e) {
+      /* No WebGL postFX available; plain fills still render. */
+    }
   }
 
   addGlow(obj, color, strength) {
@@ -179,4 +197,14 @@ export class MenuScene extends Phaser.Scene {
 
 function hexColor(n) {
   return '#' + n.toString(16).padStart(6, '0');
+}
+
+function mix(a, b, t) {
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  return (
+    (Math.round(ar + (br - ar) * t) << 16) |
+    (Math.round(ag + (bg - ag) * t) << 8) |
+    Math.round(ab + (bb - ab) * t)
+  );
 }

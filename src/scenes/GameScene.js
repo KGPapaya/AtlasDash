@@ -34,7 +34,6 @@ const PAD_V = -1240; // jump-pad launch velocity (apex well above a normal jump)
 const ORB_R = 28; // jump-orb activation radius (generous)
 
 const COLOR_BG = 0x0b0b16;
-const COLOR_BG_PULSE = 0x141430;
 const COLOR_PLAYER = 0x2ee6ff;
 const COLOR_GROUND = 0x12121c;
 const COLOR_GROUND_LINE = 0x2ee6ff;
@@ -46,7 +45,6 @@ const COLOR_ORB = 0xffe14d;
 const COLOR_PAD = 0xff7ad9;
 const COLOR_INVERT = 0xb14dff; // gravity-invert portal (violet)
 const COLOR_RESTORE = 0x2b8cff; // gravity-restore portal (blue)
-const COLOR_GRID = 0x1e2742;
 const COLOR_BAR = 0x2ee6ff;
 const COLOR_BAR_BG = 0x191926;
 
@@ -62,7 +60,6 @@ export class GameScene extends Phaser.Scene {
     this.gameState = 'ready';
     this.distance = 0;
     this.obstacles = [];
-    this.trails = [];
     this.pointerJustDown = false;
     this.wasGrounded = true;
     this.grounded = true;
@@ -83,20 +80,22 @@ export class GameScene extends Phaser.Scene {
     this.prevTop = this.groundTop - PLAYER_SIZE;
     this.accent = this.cfg.accent || COLOR_BAR;
 
-    this.bg = this.add.rectangle(0, 0, width, height, COLOR_BG).setOrigin(0, 0).setDepth(-20);
+    this.buildBackdrop(width, height);
 
-    if (!this.textures.exists('atlas-grid')) {
+    const gridKey = 'atlas-grid-w';
+    if (!this.textures.exists(gridKey)) {
       const g = this.make.graphics({ x: 0, y: 0, add: false });
-      g.lineStyle(1, COLOR_GRID, 1);
+      g.lineStyle(1, 0xffffff, 1);
       g.strokeRect(0, 0, BLOCK, BLOCK);
-      g.generateTexture('atlas-grid', BLOCK, BLOCK);
+      g.generateTexture(gridKey, BLOCK, BLOCK);
       g.destroy();
     }
     this.grid = this.add
-      .tileSprite(0, 0, width, this.groundTop, 'atlas-grid')
+      .tileSprite(0, 0, width, this.groundTop, gridKey)
       .setOrigin(0, 0)
-      .setAlpha(0.5)
+      .setAlpha(0.16)
       .setDepth(-10);
+    this.grid.setTint(this.accent);
 
     this.attemptLabel = this.add
       .text(width / 2, this.groundTop * 0.42, '', {
@@ -125,7 +124,29 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.player = this.add.rectangle(PLAYER_X, this.groundTop - HALF, PLAYER_SIZE, PLAYER_SIZE, COLOR_PLAYER);
-    this.addGlow(this.player, COLOR_PLAYER, 4);
+    this.addGlow(this.player, COLOR_PLAYER, 6);
+
+    if (!this.textures.exists('spark')) {
+      const sg = this.make.graphics({ x: 0, y: 0, add: false });
+      sg.fillStyle(0xffffff, 1);
+      sg.fillCircle(8, 8, 8);
+      sg.generateTexture('spark', 16, 16);
+      sg.destroy();
+    }
+    this.trailEmitter = this.add
+      .particles(0, 0, 'spark', {
+        lifespan: 420,
+        speedX: { min: -660, max: -560 }, // stream left at ~world speed for a wake
+        speedY: { min: -22, max: 22 },
+        scale: { start: 1.0, end: 0 },
+        alpha: { start: 0.7, end: 0 },
+        tint: COLOR_PLAYER,
+        frequency: 8,
+        blendMode: 'ADD',
+      })
+      .setDepth(-1);
+    this.trailEmitter.startFollow(this.player);
+    this.trailEmitter.stop();
 
     this.add.rectangle(16, 10, width - 32, 6, COLOR_BAR_BG).setOrigin(0, 0).setDepth(5);
     this.progressBar = this.add.rectangle(16, 10, width - 32, 6, this.accent).setOrigin(0, 0).setDepth(5);
@@ -160,6 +181,7 @@ export class GameScene extends Phaser.Scene {
 
     this.updateHud();
     this.showBanner(this.cfg.name + '\nPress Space or Tap to start\nEsc for menu');
+    this.applyCameraFx();
   }
 
   update(time, delta) {
@@ -197,8 +219,6 @@ export class GameScene extends Phaser.Scene {
     const dt = Math.min(delta, 40) / 1000; // clamp so a frame hitch can't tunnel obstacles
     const dx = SPEED * dt;
     this.grid.tilePositionX += dx;
-    this.spawnTrail();
-    this.updateTrails(dx, delta);
 
     // Scroll obstacles, reposition their parts, cull off-screen.
     for (let i = this.obstacles.length - 1; i >= 0; i--) {
@@ -208,6 +228,9 @@ export class GameScene extends Phaser.Scene {
       if (o.type === 'gravportal' && !o.triggered && o.x + o.w / 2 <= PLAYER_X) {
         this.gravityDir = o.targetDir;
         o.triggered = true;
+        const pc = o.targetDir === -1 ? COLOR_INVERT : COLOR_RESTORE;
+        this.burst(PLAYER_X, this.player.y, pc, 26, 280, 560);
+        this.cameras.main.flash(140, (pc >> 16) & 255, (pc >> 8) & 255, pc & 255);
       }
       if (o.x + o.w < 0) {
         for (const part of o.gos) part.go.destroy();
@@ -336,49 +359,36 @@ export class GameScene extends Phaser.Scene {
       this.player.angle += SPIN_RATE * this.gravityDir * (delta / 1000);
     } else if (!this.wasGrounded) {
       this.player.angle = Math.round(this.player.angle / 90) * 90;
+      this.squashStretch(1.16, 0.86); // squash on landing
     }
     this.wasGrounded = this.grounded;
   }
 
-  spawnTrail() {
-    const t = this.add
-      .rectangle(this.player.x, this.player.y, PLAYER_SIZE, PLAYER_SIZE, COLOR_PLAYER)
-      .setAngle(this.player.angle)
-      .setAlpha(0.32)
-      .setDepth(-1);
-    this.trails.push(t);
-  }
-
-  updateTrails(dx, delta) {
-    for (let i = this.trails.length - 1; i >= 0; i--) {
-      const tr = this.trails[i];
-      tr.x -= dx;
-      tr.alpha -= (delta / 1000) * 1.4;
-      const s = Math.max(0.4, tr.alpha / 0.32);
-      tr.scaleX = s;
-      tr.scaleY = s;
-      if (tr.alpha <= 0 || tr.x + PLAYER_SIZE < 0) {
-        tr.destroy();
-        this.trails.splice(i, 1);
-      }
-    }
-  }
-
   pulseBackground(time) {
     const p = 0.5 + 0.5 * Math.sin((time / 1000) * Math.PI * 2 * (130 / 60));
-    const a = COLOR_BG;
-    const b = COLOR_BG_PULSE;
-    const r = Math.round(((a >> 16) & 255) + (((b >> 16) & 255) - ((a >> 16) & 255)) * p);
-    const g = Math.round(((a >> 8) & 255) + (((b >> 8) & 255) - ((a >> 8) & 255)) * p);
-    const bl = Math.round((a & 255) + ((b & 255) - (a & 255)) * p);
-    this.bg.fillColor = (r << 16) | (g << 8) | bl;
+    if (this.pulseOverlay) this.pulseOverlay.alpha = 0.05 * p;
   }
 
   tryJump() {
     if (this.grounded) {
       this.vy = JUMP_V * this.gravityDir;
       this.grounded = false;
+      this.squashStretch(0.86, 1.16); // stretch on takeoff
     }
+  }
+
+  // Subtle squash/stretch (visual only; never touches the hurt box). Snap to the
+  // target scale, then ease back to 1 with a little overshoot.
+  squashStretch(sx, sy) {
+    if (this.squashTween) this.squashTween.stop();
+    this.player.setScale(sx, sy);
+    this.squashTween = this.tweens.add({
+      targets: this.player,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 150,
+      ease: 'Back.out',
+    });
   }
 
   handleMenuPress() {
@@ -402,6 +412,7 @@ export class GameScene extends Phaser.Scene {
     this.attempts += 1;
     this.attemptLabel.setText('Attempt ' + this.attempts);
     this.hideBanner();
+    if (this.trailEmitter) this.trailEmitter.start();
     this.scheduleNextSpawn();
   }
 
@@ -625,6 +636,7 @@ export class GameScene extends Phaser.Scene {
         this.vy = JUMP_V * this.gravityDir;
         this.grounded = false;
         o.used = true;
+        this.burst(o.x + o.w / 2, o.top + o.w / 2, COLOR_ORB, 14, 200, 420);
       } else if (!over) {
         o.used = false;
       }
@@ -646,6 +658,7 @@ export class GameScene extends Phaser.Scene {
         this.vy = PAD_V * this.gravityDir;
         this.grounded = false;
         o.used = true;
+        this.burst(PLAYER_X, this.player.y, COLOR_PAD, 18, 300, 460);
       } else if (!overlapX) {
         o.used = false;
       }
@@ -673,12 +686,20 @@ export class GameScene extends Phaser.Scene {
   die() {
     this.gameState = 'dead';
     this.vy = 0;
-    this.cameras.main.shake(250, 0.012);
+    if (this.trailEmitter) this.trailEmitter.stop();
+    this.burst(this.player.x, this.player.y, COLOR_SPIKE, 40, 360, 720);
+    this.burst(this.player.x, this.player.y, COLOR_PLAYER, 20, 220, 720);
+    this.player.setVisible(false);
+    this.cameras.main.shake(320, 0.02);
+    this.cameras.main.flash(160, 255, 46, 99);
     this.showBanner('Game Over\n' + this.cfg.name + '\nPress Space or Tap to retry\nEsc for menu');
   }
 
   completeLevel() {
     this.vy = 0;
+    if (this.trailEmitter) this.trailEmitter.stop();
+    this.burst(this.player.x, this.player.y, this.accent, 54, 380, 900);
+    this.cameras.main.flash(200, 255, 255, 255);
     if (this.levelIndex + 1 < LEVELS.length) {
       this.gameState = 'complete';
       this.showBanner(this.cfg.name + ' complete\nPress Space or Tap to continue\nEsc for menu');
@@ -705,6 +726,78 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // Synthwave backdrop: gradient sky, outrun sun, skyline silhouette, breathing glow.
+  // All dim/desaturated and behind the play plane so hazards stay readable.
+  buildBackdrop(width, height) {
+    const horizon = Math.round(height * 0.46);
+    const sky = this.add.graphics().setDepth(-30);
+    const mid = mix(0x150b2e, this.accent, 0.12);
+    sky.fillGradientStyle(COLOR_BG, COLOR_BG, mid, mid, 1);
+    sky.fillRect(0, 0, width, horizon);
+    sky.fillGradientStyle(mid, mid, 0x09060f, 0x09060f, 1);
+    sky.fillRect(0, horizon, width, height - horizon);
+
+    this.buildSun(width / 2, Math.round(height * 0.3), 66);
+
+    const sl = this.add.graphics().setDepth(-26);
+    sl.fillStyle(mix(0x0d0a1a, this.accent, 0.06), 1);
+    let x = -10;
+    while (x < width + 10) {
+      const w = 18 + ((x * 37) % 46);
+      const h = 8 + ((x * 13) % 30);
+      sl.fillRect(x, horizon - h, w + 1, h);
+      x += w;
+    }
+
+    this.pulseOverlay = this.add
+      .rectangle(0, 0, width, height, this.accent, 0)
+      .setOrigin(0, 0)
+      .setDepth(-25);
+  }
+
+  buildSun(cx, cy, r) {
+    const col = mix(this.accent, 0xff9d5c, 0.35);
+    const g = this.add.graphics().setDepth(-28);
+    g.fillStyle(col, 0.5);
+    const step = 4;
+    for (let y = -r; y <= r; y += step) {
+      if (y > r * 0.2 && Math.floor(y / step) % 2 === 0) continue; // outrun scanline gaps
+      const hw = Math.sqrt(Math.max(0, r * r - y * y));
+      g.fillRect(cx - hw, cy + y, hw * 2, step - 1);
+    }
+    this.addGlow(g, col, 3);
+  }
+
+  // One-shot particle burst at (x,y); cleans itself up after the particles fade.
+  burst(x, y, color, count, speed = 260, lifespan = 600) {
+    const e = this.add
+      .particles(x, y, 'spark', {
+        lifespan,
+        speed: { min: speed * 0.25, max: speed },
+        scale: { start: 0.95, end: 0 },
+        alpha: { start: 1, end: 0 },
+        tint: color,
+        blendMode: 'ADD',
+        emitting: false,
+      })
+      .setDepth(3);
+    e.explode(count);
+    this.time.delayedCall(lifespan + 80, () => e.destroy());
+  }
+
+  // Camera-level grading: one cheap full-screen pass each. Gated for canvas fallback.
+  applyCameraFx() {
+    try {
+      const cam = this.cameras.main;
+      if (!cam.postFX) return;
+      if (cam.postFX.addBloom) cam.postFX.addBloom(0xffffff, 1, 1, 1.1, 0.55, 4);
+      if (cam.postFX.addVignette) cam.postFX.addVignette(0.5, 0.52, 0.78, 0.4);
+      if (cam.postFX.addColorMatrix) cam.postFX.addColorMatrix().saturate(0.2);
+    } catch (e) {
+      /* No WebGL postFX available; plain fills still render. */
+    }
+  }
+
   showBanner(text) {
     this.banner.setText(text).setVisible(true);
   }
@@ -712,4 +805,14 @@ export class GameScene extends Phaser.Scene {
   hideBanner() {
     this.banner.setVisible(false);
   }
+}
+
+function mix(a, b, t) {
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  return (
+    (Math.round(ar + (br - ar) * t) << 16) |
+    (Math.round(ag + (bg - ag) * t) << 8) |
+    Math.round(ab + (bb - ab) * t)
+  );
 }
