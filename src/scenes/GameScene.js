@@ -1,5 +1,6 @@
 /* global Phaser */
 import { LEVELS } from '../levels.js';
+import { audio } from '../audio.js';
 
 const PLAYER_X = 160;
 const PLAYER_SIZE = 40;
@@ -175,10 +176,18 @@ export class GameScene extends Phaser.Scene {
     this.escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.menuKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     this.input.keyboard.addCapture('SPACE,UP,ESC,M');
-    this.input.on('pointerdown', () => {
+    this.input.keyboard.on('keydown', () => audio.resume());
+    this.input.on('pointerdown', (pointer) => {
+      audio.resume();
+      if (this.muteHit && this.muteHit.getBounds().contains(pointer.x, pointer.y)) {
+        audio.toggleMute();
+        this.drawMuteIcon();
+        return;
+      }
       this.pointerJustDown = true;
     });
 
+    this.createMuteButton();
     this.updateHud();
     this.showBanner(this.cfg.name + '\nPress Space or Tap to start\nEsc for menu');
     this.applyCameraFx();
@@ -189,6 +198,7 @@ export class GameScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.escKey) ||
       Phaser.Input.Keyboard.JustDown(this.menuKey)
     ) {
+      audio.stopMusic();
       this.scene.start('MenuScene');
       return;
     }
@@ -197,7 +207,9 @@ export class GameScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.upKey) ||
       this.pointerJustDown;
     this.pointerJustDown = false;
-    const holding = this.spaceKey.isDown || this.upKey.isDown || this.input.activePointer.isDown;
+    const ap = this.input.activePointer;
+    const overMute = ap.isDown && this.muteHit && this.muteHit.getBounds().contains(ap.x, ap.y);
+    const holding = this.spaceKey.isDown || this.upKey.isDown || (ap.isDown && !overMute);
 
     this.pulseBackground(time);
 
@@ -231,6 +243,7 @@ export class GameScene extends Phaser.Scene {
         const pc = o.targetDir === -1 ? COLOR_INVERT : COLOR_RESTORE;
         this.burst(PLAYER_X, this.player.y, pc, 26, 280, 560);
         this.cameras.main.flash(140, (pc >> 16) & 255, (pc >> 8) & 255, pc & 255);
+        audio.flip();
       }
       if (o.x + o.w < 0) {
         for (const part of o.gos) part.go.destroy();
@@ -360,6 +373,7 @@ export class GameScene extends Phaser.Scene {
     } else if (!this.wasGrounded) {
       this.player.angle = Math.round(this.player.angle / 90) * 90;
       this.squashStretch(1.16, 0.86); // squash on landing
+      audio.land();
     }
     this.wasGrounded = this.grounded;
   }
@@ -374,6 +388,7 @@ export class GameScene extends Phaser.Scene {
       this.vy = JUMP_V * this.gravityDir;
       this.grounded = false;
       this.squashStretch(0.86, 1.16); // stretch on takeoff
+      audio.jump();
     }
   }
 
@@ -413,6 +428,7 @@ export class GameScene extends Phaser.Scene {
     this.attemptLabel.setText('Attempt ' + this.attempts);
     this.hideBanner();
     if (this.trailEmitter) this.trailEmitter.start();
+    audio.startMusic();
     this.scheduleNextSpawn();
   }
 
@@ -637,6 +653,7 @@ export class GameScene extends Phaser.Scene {
         this.grounded = false;
         o.used = true;
         this.burst(o.x + o.w / 2, o.top + o.w / 2, COLOR_ORB, 14, 200, 420);
+        audio.orb();
       } else if (!over) {
         o.used = false;
       }
@@ -659,6 +676,7 @@ export class GameScene extends Phaser.Scene {
         this.grounded = false;
         o.used = true;
         this.burst(PLAYER_X, this.player.y, COLOR_PAD, 18, 300, 460);
+        audio.pad();
       } else if (!overlapX) {
         o.used = false;
       }
@@ -686,6 +704,8 @@ export class GameScene extends Phaser.Scene {
   die() {
     this.gameState = 'dead';
     this.vy = 0;
+    audio.die();
+    audio.stopMusic();
     if (this.trailEmitter) this.trailEmitter.stop();
     this.burst(this.player.x, this.player.y, COLOR_SPIKE, 40, 360, 720);
     this.burst(this.player.x, this.player.y, COLOR_PLAYER, 20, 220, 720);
@@ -697,6 +717,8 @@ export class GameScene extends Phaser.Scene {
 
   completeLevel() {
     this.vy = 0;
+    audio.complete();
+    audio.stopMusic();
     if (this.trailEmitter) this.trailEmitter.stop();
     this.burst(this.player.x, this.player.y, this.accent, 54, 380, 900);
     this.cameras.main.flash(200, 255, 255, 255);
@@ -804,6 +826,44 @@ export class GameScene extends Phaser.Scene {
 
   hideBanner() {
     this.banner.setVisible(false);
+  }
+
+  // Clickable speaker toggle (bottom-right; top-right HUD is taken by the percent
+  // label). Click handling lives in the scene pointerdown so it never doubles as a
+  // jump. State persists on the audio singleton, so it survives scene changes.
+  createMuteButton() {
+    const x = this.scale.width - 24;
+    const y = this.scale.height - 22;
+    this.muteG = this.add.graphics().setDepth(6);
+    this.muteHit = this.add.rectangle(x, y, 36, 30, 0x000000, 0.001).setDepth(6);
+    this.drawMuteIcon();
+  }
+
+  drawMuteIcon() {
+    const g = this.muteG;
+    if (!g) return;
+    const x = this.scale.width - 24;
+    const y = this.scale.height - 22;
+    g.clear();
+    const col = 0x9fb0d0;
+    g.fillStyle(col, 1);
+    g.fillRect(x - 10, y - 4, 5, 8);
+    g.fillTriangle(x - 5, y - 8, x - 5, y + 8, x + 1, y);
+    if (audio.muted) {
+      g.lineStyle(2.5, 0xff5577, 1);
+      g.beginPath();
+      g.moveTo(x - 12, y - 9);
+      g.lineTo(x + 8, y + 9);
+      g.strokePath();
+    } else {
+      g.lineStyle(2, col, 1);
+      g.beginPath();
+      g.arc(x + 3, y, 5, -0.6, 0.6);
+      g.strokePath();
+      g.beginPath();
+      g.arc(x + 3, y, 9, -0.6, 0.6);
+      g.strokePath();
+    }
   }
 }
 

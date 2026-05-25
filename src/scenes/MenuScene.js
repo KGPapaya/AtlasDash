@@ -1,5 +1,6 @@
 /* global Phaser */
 import { LEVELS } from '../levels.js';
+import { audio } from '../audio.js';
 
 const COLOR_BG = 0x0b0b16;
 const COLOR_TITLE = 0x2ee6ff;
@@ -121,10 +122,12 @@ export class MenuScene extends Phaser.Scene {
     this.input.keyboard.on('keydown', (e) => this.onKey(e));
 
     this.refreshCards();
+    this.createMuteButton();
   }
 
   onKey(e) {
     if (this.selecting) return;
+    audio.resume();
     const code = e.code;
     if (code === 'ArrowRight') this.move(1, 0);
     else if (code === 'ArrowLeft') this.move(-1, 0);
@@ -148,6 +151,7 @@ export class MenuScene extends Phaser.Scene {
     if (idx >= LEVELS.length) idx = LEVELS.length - 1;
     this.selIndex = idx;
     this.refreshCards();
+    audio.uiMove();
   }
 
   refreshCards() {
@@ -165,6 +169,8 @@ export class MenuScene extends Phaser.Scene {
   launch(i) {
     if (this.selecting) return;
     this.selecting = true;
+    audio.resume();
+    audio.uiSelect();
     this.scene.start('GameScene', { level: i });
   }
 
@@ -191,6 +197,51 @@ export class MenuScene extends Phaser.Scene {
       if (obj.postFX && obj.postFX.addGlow) obj.postFX.addGlow(color, strength, 0);
     } catch (e) {
       /* No WebGL postFX available; the plain fill still renders. */
+    }
+  }
+
+  // Clickable speaker toggle (bottom-right). Mute state lives on the audio
+  // singleton, so it persists between the menu and the game.
+  createMuteButton() {
+    const x = this.scale.width - 24;
+    const y = this.scale.height - 22;
+    this.muteG = this.add.graphics().setDepth(6);
+    this.muteHit = this.add
+      .rectangle(x, y, 36, 30, 0x000000, 0.001)
+      .setDepth(6)
+      .setInteractive({ useHandCursor: true });
+    this.muteHit.on('pointerdown', () => {
+      audio.resume();
+      audio.toggleMute();
+      this.drawMuteIcon();
+    });
+    this.drawMuteIcon();
+  }
+
+  drawMuteIcon() {
+    const g = this.muteG;
+    if (!g) return;
+    const x = this.scale.width - 24;
+    const y = this.scale.height - 22;
+    g.clear();
+    const col = 0x9fb0d0;
+    g.fillStyle(col, 1);
+    g.fillRect(x - 10, y - 4, 5, 8);
+    g.fillTriangle(x - 5, y - 8, x - 5, y + 8, x + 1, y);
+    if (audio.muted) {
+      g.lineStyle(2.5, 0xff5577, 1);
+      g.beginPath();
+      g.moveTo(x - 12, y - 9);
+      g.lineTo(x + 8, y + 9);
+      g.strokePath();
+    } else {
+      g.lineStyle(2, col, 1);
+      g.beginPath();
+      g.arc(x + 3, y, 5, -0.6, 0.6);
+      g.strokePath();
+      g.beginPath();
+      g.arc(x + 3, y, 9, -0.6, 0.6);
+      g.strokePath();
     }
   }
 }
