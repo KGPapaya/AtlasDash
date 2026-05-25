@@ -44,6 +44,8 @@ const COLOR_BLOCK_LINE = 0xffffff;
 const COLOR_PORTAL = 0x39ff6a;
 const COLOR_ORB = 0xffe14d;
 const COLOR_PAD = 0xff7ad9;
+const COLOR_INVERT = 0xb14dff; // gravity-invert portal (violet)
+const COLOR_RESTORE = 0x2b8cff; // gravity-restore portal (blue)
 const COLOR_GRID = 0x1e2742;
 const COLOR_BAR = 0x2ee6ff;
 const COLOR_BAR_BG = 0x191926;
@@ -66,6 +68,8 @@ export class GameScene extends Phaser.Scene {
     this.grounded = true;
     this.vy = 0;
     this.prevBottom = 0;
+    this.prevTop = 0;
+    this.gravityDir = 1; // +1 normal (rest on ground), -1 inverted (rest on ceiling)
     this.portal = null;
     this.portalSpawned = false;
     this.lastPatternW = 0;
@@ -74,7 +78,9 @@ export class GameScene extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     this.groundTop = height - GROUND_HEIGHT;
+    this.ceilingFloor = GROUND_HEIGHT; // inverted-gravity floor (mirror of groundTop)
     this.prevBottom = this.groundTop;
+    this.prevTop = this.groundTop - PLAYER_SIZE;
     this.accent = this.cfg.accent || COLOR_BAR;
 
     this.bg = this.add.rectangle(0, 0, width, height, COLOR_BG).setOrigin(0, 0).setDepth(-20);
@@ -110,6 +116,13 @@ export class GameScene extends Phaser.Scene {
     );
     this.groundLine = this.add.rectangle(width / 2, this.groundTop, width, 4, this.accent);
     this.addGlow(this.groundLine, this.accent, 4);
+
+    if (this.cfg.gravity) {
+      // Mirror the ground at the top. This band is the floor when gravity is inverted.
+      this.add.rectangle(width / 2, GROUND_HEIGHT / 2, width, GROUND_HEIGHT, COLOR_GROUND);
+      const ceilLine = this.add.rectangle(width / 2, this.ceilingFloor, width, 4, this.accent);
+      this.addGlow(ceilLine, this.accent, 4);
+    }
 
     this.player = this.add.rectangle(PLAYER_X, this.groundTop - HALF, PLAYER_SIZE, PLAYER_SIZE, COLOR_PLAYER);
     this.addGlow(this.player, COLOR_PLAYER, 4);
@@ -192,6 +205,10 @@ export class GameScene extends Phaser.Scene {
       const o = this.obstacles[i];
       o.x -= dx;
       for (const part of o.gos) part.go.x = o.x + part.dx;
+      if (o.type === 'gravportal' && !o.triggered && o.x + o.w / 2 <= PLAYER_X) {
+        this.gravityDir = o.targetDir;
+        o.triggered = true;
+      }
       if (o.x + o.w < 0) {
         for (const part of o.gos) part.go.destroy();
         this.obstacles.splice(i, 1);
@@ -208,19 +225,30 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Manual kinematic player (gravity + jump arc under our control).
-    this.vy += GRAVITY * dt;
+    // gravityDir +1 = normal (fall down, rest on ground); -1 = inverted (fall up, rest on ceiling).
+    this.vy += GRAVITY * this.gravityDir * dt;
     this.player.y += this.vy * dt;
-    if (this.player.y < HALF) {
-      this.player.y = HALF;
-      this.vy = 0;
+    if (this.gravityDir === 1) {
+      if (this.player.y < HALF) {
+        this.player.y = HALF;
+        this.vy = 0;
+      }
+    } else {
+      const maxY = this.scale.height - HALF;
+      if (this.player.y > maxY) {
+        this.player.y = maxY;
+        this.vy = 0;
+      }
     }
     const bottom = this.player.y + HALF;
+    const top = this.player.y - HALF;
 
     // Resolve hazards + figure out the surface under the player this frame.
     const hurt = this.playerHurtBox();
     const footL = PLAYER_X - (HALF - 2);
     const footR = PLAYER_X + (HALF - 2);
-    let supportTop = this.groundTop;
+    let supportTop = this.groundTop; // normal floor (gravityDir +1)
+    let supportBottom = this.ceilingFloor; // inverted floor (gravityDir -1)
 
     for (const o of this.obstacles) {
       if (o.type === 'spike') {
@@ -264,14 +292,25 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    if (bottom >= supportTop) {
-      this.player.y = supportTop - HALF;
-      this.vy = 0;
-      this.grounded = true;
+    if (this.gravityDir === 1) {
+      if (bottom >= supportTop) {
+        this.player.y = supportTop - HALF;
+        this.vy = 0;
+        this.grounded = true;
+      } else {
+        this.grounded = false;
+      }
     } else {
-      this.grounded = false;
+      if (top <= supportBottom) {
+        this.player.y = supportBottom + HALF;
+        this.vy = 0;
+        this.grounded = true;
+      } else {
+        this.grounded = false;
+      }
     }
     this.prevBottom = this.player.y + HALF;
+    this.prevTop = this.player.y - HALF;
 
     this.distance += dx;
     this.updateHud();
@@ -287,12 +326,14 @@ export class GameScene extends Phaser.Scene {
   spikeHitBox(o) {
     const hitW = Math.min(20, o.w * 0.5);
     const hitH = o.h * 0.55;
-    return new Phaser.Geom.Rectangle(o.x + (o.w - hitW) / 2, this.groundTop - hitH, hitW, hitH);
+    const hx = o.x + (o.w - hitW) / 2;
+    if (o.inverted) return new Phaser.Geom.Rectangle(hx, this.ceilingFloor, hitW, hitH);
+    return new Phaser.Geom.Rectangle(hx, this.groundTop - hitH, hitW, hitH);
   }
 
   updateSpin(delta) {
     if (!this.grounded) {
-      this.player.angle += SPIN_RATE * (delta / 1000);
+      this.player.angle += SPIN_RATE * this.gravityDir * (delta / 1000);
     } else if (!this.wasGrounded) {
       this.player.angle = Math.round(this.player.angle / 90) * 90;
     }
@@ -335,7 +376,7 @@ export class GameScene extends Phaser.Scene {
 
   tryJump() {
     if (this.grounded) {
-      this.vy = JUMP_V;
+      this.vy = JUMP_V * this.gravityDir;
       this.grounded = false;
     }
   }
@@ -356,6 +397,7 @@ export class GameScene extends Phaser.Scene {
     this.gameState = 'running';
     this.distance = 0;
     this.vy = 0;
+    this.gravityDir = 1;
     this.grounded = true;
     this.attempts += 1;
     this.attemptLabel.setText('Attempt ' + this.attempts);
@@ -443,15 +485,39 @@ export class GameScene extends Phaser.Scene {
       this.addCapped(x + 200, 110, 20);
       return 240;
     }
+    if (key === 'flipHop') {
+      // Invert gravity, run on the ceiling, jump (downward) over one ceiling spike,
+      // then restore. Runways sized to the measured 258px gravity transit (280 = margin).
+      this.addGravityPortal(x + 40, -1);
+      this.addSpike(x + 320, SPIKE_H, true);
+      this.addGravityPortal(x + 620, 1);
+      return 900;
+    }
+    if (key === 'flipLane') {
+      // Invert gravity so the ceiling is the only safe lane past a near-full-height wall,
+      // then restore. Logic: stay grounded on the ceiling, do NOT bounce into the wall.
+      this.addGravityPortal(x + 40, -1);
+      for (let i = 0; i < 3; i++) this.addCapped(x + 320 + i * BLOCK, 316, 24); // 340 tall
+      this.addGravityPortal(x + 560, 1);
+      return 840;
+    }
     this.addSpike(x);
     return SPIKE_W;
   }
 
-  addSpike(x, h = SPIKE_H) {
+  addSpike(x, h = SPIKE_H, inverted = false) {
     const w = SPIKE_W;
-    const tri = this.add.triangle(x, this.groundTop - h, 0, h, w, h, w / 2, 0, COLOR_SPIKE).setOrigin(0, 0);
+    let tri, top;
+    if (inverted) {
+      // Mounted on the ceiling floor, apex pointing down into the arena.
+      top = this.ceilingFloor;
+      tri = this.add.triangle(x, top, 0, 0, w, 0, w / 2, h, COLOR_SPIKE).setOrigin(0, 0);
+    } else {
+      top = this.groundTop - h;
+      tri = this.add.triangle(x, top, 0, h, w, h, w / 2, 0, COLOR_SPIKE).setOrigin(0, 0);
+    }
     this.addGlow(tri, COLOR_SPIKE, 3);
-    this.obstacles.push({ type: 'spike', x, w, h, top: this.groundTop - h, gos: [{ go: tri, dx: 0 }] });
+    this.obstacles.push({ type: 'spike', x, w, h, top, inverted, gos: [{ go: tri, dx: 0 }] });
   }
 
   addBlock(x, w, h) {
@@ -527,6 +593,27 @@ export class GameScene extends Phaser.Scene {
     this.obstacles.push({ type: 'pad', x, w, top, h, used: false, gos: [{ go: rect, dx: 0 }] });
   }
 
+  // Gravity portal: non-lethal gate that sets gravityDir when its center reaches the
+  // player (-1 = invert / run on the ceiling, +1 = restore normal). Idempotent.
+  addGravityPortal(x, dir) {
+    const color = dir === -1 ? COLOR_INVERT : COLOR_RESTORE;
+    const w = 26;
+    const top = this.ceilingFloor;
+    const h = this.groundTop - this.ceilingFloor;
+    const gate = this.add.rectangle(x, top + h / 2, w, h, color, 0.18);
+    gate.setStrokeStyle(3, color, 1);
+    this.addGlow(gate, color, 6);
+    this.obstacles.push({
+      type: 'gravportal',
+      x: x - w / 2,
+      w,
+      top,
+      targetDir: dir,
+      triggered: false,
+      gos: [{ go: gate, dx: w / 2 }],
+    });
+  }
+
   // Jump orb: a jump input while overlapping gives one mid-air jump per pass.
   tryOrbs(jumpInput) {
     const hurt = this.playerHurtBox();
@@ -535,7 +622,7 @@ export class GameScene extends Phaser.Scene {
       const box = new Phaser.Geom.Rectangle(o.x, o.top, o.w, o.w);
       const over = Phaser.Geom.Intersects.RectangleToRectangle(hurt, box);
       if (over && jumpInput && !o.used) {
-        this.vy = JUMP_V;
+        this.vy = JUMP_V * this.gravityDir;
         this.grounded = false;
         o.used = true;
       } else if (!over) {
@@ -548,12 +635,15 @@ export class GameScene extends Phaser.Scene {
   tryPads() {
     const footL = PLAYER_X - (HALF - 2);
     const footR = PLAYER_X + (HALF - 2);
-    const onGround = this.player.y + HALF >= this.groundTop - 16;
+    const onGround =
+      this.gravityDir === 1
+        ? this.player.y + HALF >= this.groundTop - 16
+        : this.player.y - HALF <= this.ceilingFloor + 16;
     for (const o of this.obstacles) {
       if (o.type !== 'pad') continue;
       const overlapX = footR > o.x && footL < o.x + o.w;
       if (overlapX && onGround && !o.used) {
-        this.vy = PAD_V;
+        this.vy = PAD_V * this.gravityDir;
         this.grounded = false;
         o.used = true;
       } else if (!overlapX) {
