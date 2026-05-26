@@ -62,6 +62,7 @@ export class GameScene extends Phaser.Scene {
     this.distance = 0;
     this.obstacles = [];
     this.pointerJustDown = false;
+    this.pointerHeld = false;
     this.wasGrounded = true;
     this.grounded = true;
     this.vy = 0;
@@ -185,6 +186,26 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       this.pointerJustDown = true;
+      this.pointerHeld = true;
+    });
+    // Clear the hold on every release or focus loss instead of polling
+    // activePointer.isDown, which can stay stuck "down" when a click is released in the
+    // dead space outside the 960x540 canvas or the window loses focus. Polling that
+    // stuck flag made a single click bounce forever. pointerupoutside covers the
+    // release-outside-canvas case; the game BLUR covers alt-tab with the button held.
+    const releaseHold = () => {
+      this.pointerHeld = false;
+    };
+    this.input.on('pointerup', releaseHold);
+    this.input.on('pointerupoutside', releaseHold);
+    const onBlur = () => {
+      this.pointerHeld = false;
+      this.spaceKey.reset();
+      this.upKey.reset();
+    };
+    this.game.events.on(Phaser.Core.Events.BLUR, onBlur);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.game.events.off(Phaser.Core.Events.BLUR, onBlur);
     });
 
     this.createMuteButton();
@@ -207,9 +228,9 @@ export class GameScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.upKey) ||
       this.pointerJustDown;
     this.pointerJustDown = false;
-    const ap = this.input.activePointer;
-    const overMute = ap.isDown && this.muteHit && this.muteHit.getBounds().contains(ap.x, ap.y);
-    const holding = this.spaceKey.isDown || this.upKey.isDown || (ap.isDown && !overMute);
+    // pointerHeld is maintained by explicit pointer/blur events (see create) so a
+    // released or focus-lost pointer can never read as a permanent hold.
+    const holding = this.pointerHeld || this.spaceKey.isDown || this.upKey.isDown;
 
     this.pulseBackground(time);
 
