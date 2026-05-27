@@ -185,6 +185,10 @@ export class GameScene extends Phaser.Scene {
         this.drawMuteIcon();
         return;
       }
+      if (this.fsHit && this.fsHit.getBounds().contains(pointer.x, pointer.y)) {
+        this.scale.toggleFullscreen();
+        return;
+      }
       this.pointerJustDown = true;
       this.pointerHeld = true;
     });
@@ -209,6 +213,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.createMuteButton();
+    this.createFullscreenButton();
     this.updateHud();
     this.showBanner(this.cfg.name + '\nPress Space or Tap to start\nEsc for menu');
     this.applyCameraFx();
@@ -884,6 +889,41 @@ export class GameScene extends Phaser.Scene {
       g.beginPath();
       g.arc(x + 3, y, 9, -0.6, 0.6);
       g.strokePath();
+    }
+  }
+
+  // Tap-to-fullscreen toggle, left of the mute button. Only shown where the
+  // browser supports the Fullscreen API (iPhone Safari does not; those players
+  // use Add to Home Screen instead). Hit-tested in the scene pointerdown above
+  // so a tap never doubles as a jump.
+  createFullscreenButton() {
+    if (!this.scale.fullscreen || !this.scale.fullscreen.available) return;
+    const x = this.scale.width - 64;
+    const y = this.scale.height - 22;
+    this.fsG = this.add.graphics().setDepth(6);
+    this.fsHit = this.add.rectangle(x, y, 36, 30, 0x000000, 0.001).setDepth(6);
+    this.drawFullscreenIcon();
+  }
+
+  drawFullscreenIcon() {
+    const g = this.fsG;
+    if (!g) return;
+    const x = this.scale.width - 64;
+    const y = this.scale.height - 22;
+    g.clear();
+    g.lineStyle(2, 0x9fb0d0, 1);
+    const s = 8;
+    const a = 5;
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        const cx = x + sx * s;
+        const cy = y + sy * s;
+        g.beginPath();
+        g.moveTo(cx - sx * a, cy);
+        g.lineTo(cx, cy);
+        g.lineTo(cx, cy - sy * a);
+        g.strokePath();
+      }
     }
   }
 }

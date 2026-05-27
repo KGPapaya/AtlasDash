@@ -123,6 +123,7 @@ export class MenuScene extends Phaser.Scene {
 
     this.refreshCards();
     this.createMuteButton();
+    this.createFullscreenButton();
   }
 
   onKey(e) {
@@ -242,6 +243,47 @@ export class MenuScene extends Phaser.Scene {
       g.beginPath();
       g.arc(x + 3, y, 9, -0.6, 0.6);
       g.strokePath();
+    }
+  }
+
+  // Tap-to-fullscreen toggle, left of the mute button. Only shown where the
+  // Fullscreen API exists (iPhone Safari does not; those players use Add to
+  // Home Screen). Fullscreen entered here persists into the game scene.
+  createFullscreenButton() {
+    if (!this.scale.fullscreen || !this.scale.fullscreen.available) return;
+    const x = this.scale.width - 64;
+    const y = this.scale.height - 22;
+    this.fsG = this.add.graphics().setDepth(6);
+    this.fsHit = this.add
+      .rectangle(x, y, 36, 30, 0x000000, 0.001)
+      .setDepth(6)
+      .setInteractive({ useHandCursor: true });
+    this.fsHit.on('pointerdown', () => {
+      audio.resume();
+      this.scale.toggleFullscreen();
+    });
+    this.drawFullscreenIcon();
+  }
+
+  drawFullscreenIcon() {
+    const g = this.fsG;
+    if (!g) return;
+    const x = this.scale.width - 64;
+    const y = this.scale.height - 22;
+    g.clear();
+    g.lineStyle(2, 0x9fb0d0, 1);
+    const s = 8;
+    const a = 5;
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        const cx = x + sx * s;
+        const cy = y + sy * s;
+        g.beginPath();
+        g.moveTo(cx - sx * a, cy);
+        g.lineTo(cx, cy);
+        g.lineTo(cx, cy - sy * a);
+        g.strokePath();
+      }
     }
   }
 }
