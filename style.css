@@ -2,16 +2,74 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: #000;
+  height: 100%;
+  background: #0b0b16;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
-body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
+/* Phaser (FIT + CENTER_BOTH) sizes and centers the canvas inside this parent.
+   100dvh tracks the visible viewport so the mobile address bar can't shrink it. */
+#game {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
 }
 
 canvas {
   display: block;
+  /* Stop a tap/drag on the canvas from scrolling or pinch-zooming the page. */
+  touch-action: none;
+}
+
+/* Rotate-to-landscape hint: hidden unless the device is a small portrait screen.
+   The game is built for landscape, so a portrait phone would only get a thin,
+   unplayable strip. */
+#rotate-hint {
+  display: none;
+}
+
+@media (orientation: portrait) and (max-width: 900px) {
+  #rotate-hint {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+    padding: 24px;
+    background: #0b0b16;
+    color: #e8ecff;
+    font-family: Arial, Helvetica, sans-serif;
+    text-align: center;
+  }
+
+  #rotate-hint .rotate-hint__phone {
+    width: 46px;
+    height: 80px;
+    border: 3px solid #2ee6ff;
+    border-radius: 10px;
+    box-shadow: 0 0 14px rgba(46, 230, 255, 0.5);
+    animation: rotate-hint-nudge 1.8s ease-in-out infinite;
+  }
+
+  #rotate-hint .rotate-hint__text {
+    margin: 0;
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+  }
+}
+
+@keyframes rotate-hint-nudge {
+  0%,
+  35% {
+    transform: rotate(0deg);
+  }
+  65%,
+  100% {
+    transform: rotate(-90deg);
+  }
 }
