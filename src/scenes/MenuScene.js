@@ -1,6 +1,7 @@
 /* global Phaser */
 import { LEVELS } from '../levels.js';
 import { audio } from '../audio.js';
+import { BASE_W, BASE_H, SS } from '../config.js';
 
 const COLOR_BG = 0x0b0b16;
 const COLOR_TITLE = 0x2ee6ff;
@@ -19,10 +20,16 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create() {
-    const { width, height } = this.scale;
+    const width = BASE_W;
+    const height = BASE_H;
     this.selecting = false;
     this.selIndex = 0;
     this.cards = [];
+    this.textRes = SS; // crisp text on the supersampled backing store
+
+    // Supersample: render the 960x540 world across the high-res backing store.
+    this.cameras.main.setZoom(SS);
+    this.cameras.main.centerOn(BASE_W / 2, BASE_H / 2);
 
     const sky = this.add.graphics().setDepth(-30);
     const mid = mix(0x150b2e, COLOR_TITLE, 0.1);
@@ -58,6 +65,7 @@ export class MenuScene extends Phaser.Scene {
         fontSize: '52px',
         color: '#2ee6ff',
         fontStyle: 'bold',
+        resolution: this.textRes,
       })
       .setOrigin(0.5);
     this.addGlow(title, COLOR_TITLE, 4);
@@ -67,6 +75,7 @@ export class MenuScene extends Phaser.Scene {
         fontFamily: 'Arial, sans-serif',
         fontSize: '20px',
         color: '#9fb0d0',
+        resolution: this.textRes,
       })
       .setOrigin(0.5);
 
@@ -89,6 +98,7 @@ export class MenuScene extends Phaser.Scene {
           fontFamily: 'Arial, sans-serif',
           fontSize: '10px',
           color: '#9fb0d0',
+          resolution: this.textRes,
         })
         .setOrigin(0.5);
       const num = this.add
@@ -97,6 +107,7 @@ export class MenuScene extends Phaser.Scene {
           fontSize: '28px',
           color: hexColor(accent),
           fontStyle: 'bold',
+          resolution: this.textRes,
         })
         .setOrigin(0.5);
 
@@ -115,6 +126,7 @@ export class MenuScene extends Phaser.Scene {
         fontFamily: 'Arial, sans-serif',
         fontSize: '15px',
         color: '#6b7a99',
+        resolution: this.textRes,
       })
       .setOrigin(0.5);
 
@@ -204,8 +216,8 @@ export class MenuScene extends Phaser.Scene {
   // Clickable speaker toggle (bottom-right). Mute state lives on the audio
   // singleton, so it persists between the menu and the game.
   createMuteButton() {
-    const x = this.scale.width - 24;
-    const y = this.scale.height - 22;
+    const x = BASE_W - 24;
+    const y = BASE_H - 22;
     this.muteG = this.add.graphics().setDepth(6);
     this.muteHit = this.add
       .rectangle(x, y, 36, 30, 0x000000, 0.001)
@@ -222,8 +234,8 @@ export class MenuScene extends Phaser.Scene {
   drawMuteIcon() {
     const g = this.muteG;
     if (!g) return;
-    const x = this.scale.width - 24;
-    const y = this.scale.height - 22;
+    const x = BASE_W - 24;
+    const y = BASE_H - 22;
     g.clear();
     const col = 0x9fb0d0;
     g.fillStyle(col, 1);
@@ -251,8 +263,8 @@ export class MenuScene extends Phaser.Scene {
   // Home Screen). Fullscreen entered here persists into the game scene.
   createFullscreenButton() {
     if (!this.scale.fullscreen || !this.scale.fullscreen.available) return;
-    const x = this.scale.width - 64;
-    const y = this.scale.height - 22;
+    const x = BASE_W - 64;
+    const y = BASE_H - 22;
     this.fsG = this.add.graphics().setDepth(6);
     this.fsHit = this.add
       .rectangle(x, y, 36, 30, 0x000000, 0.001)
@@ -268,8 +280,8 @@ export class MenuScene extends Phaser.Scene {
   drawFullscreenIcon() {
     const g = this.fsG;
     if (!g) return;
-    const x = this.scale.width - 64;
-    const y = this.scale.height - 22;
+    const x = BASE_W - 64;
+    const y = BASE_H - 22;
     g.clear();
     g.lineStyle(2, 0x9fb0d0, 1);
     const s = 8;

@@ -49,6 +49,22 @@ class AudioEngine {
     this.nextNoteTime = 0;
     this.step = 0;
     this._visBound = false;
+    // Beat sync: the visuals read beatPhase() to flash on the AUDIBLE kick (beats 1 &
+    // 3, eight 16ths apart) instead of a free-running sine that drifts off the music.
+    this.lastBeatTime = 0;
+    this.beatInterval = SIXTEENTH * 8;
+  }
+
+  // 0..1 phase since the most recent kick that has actually been scheduled to sound.
+  // 0 right on the downbeat, rising to 1 just before the next. Returns 0 when no music
+  // is playing so the pulse simply rests. Robust to the scheduler queuing slightly
+  // ahead of currentTime (since can go negative for a few ms).
+  beatPhase() {
+    if (!this.wantMusic || !this.ctx || !this.lastBeatTime) return 0;
+    let since = this.ctx.currentTime - this.lastBeatTime;
+    if (since < 0) since += this.beatInterval;
+    const ph = (since % this.beatInterval) / this.beatInterval;
+    return ph < 0 ? 0 : ph > 1 ? 1 : ph;
   }
 
   // Build the graph once. Safe to call repeatedly (no-op after the first time).
@@ -332,6 +348,7 @@ class AudioEngine {
     // Kick on beats 1 & 3.
     if (s === 0 || s === 8) {
       this._tone({ type: 'sine', f0: 120, f1: 50, dur: 0.12, peak: 0.7, bus: m, count: false });
+      this.lastBeatTime = when; // drives the on-beat visual pulse (beatPhase)
     }
     // Snare on beats 2 & 4.
     if (s === 4 || s === 12) {
