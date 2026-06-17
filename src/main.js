@@ -9,9 +9,8 @@ const config = {
   backgroundColor: '#0b0b16',
   // FIT scales the canvas to the viewport while the internal coordinate system stays
   // 960x540, so every hard-coded layout/physics constant keeps working. The canvas
-  // BACKING store is BASE*SS (1920x1080); each scene's camera zooms by SS so the
-  // 960x540 world fills it, giving crisp native-resolution rendering instead of a
-  // soft FIT-upscale. CENTER_BOTH centers the letterboxed canvas.
+  // backing store is BASE*SS; each scene's camera zooms by SS to match (a no-op at
+  // SS=1). CENTER_BOTH centers the letterboxed canvas.
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -19,12 +18,11 @@ const config = {
     width: BASE_W * SS,
     height: BASE_H * SS,
   },
-  // High-quality scaling for the supersampled canvas; high-performance asks the
-  // browser for the discrete GPU on hybrid machines.
+  // antialias smooths vector edges (cheap, default); high-performance asks the browser
+  // for the discrete GPU on hybrid machines. No MSAA (antialiasGL) so it does not pile
+  // bandwidth onto the bloom/glow postFX passes.
   render: {
     antialias: true,
-    antialiasGL: true,
-    roundPixels: false,
     powerPreference: 'high-performance',
   },
   scene: [BootScene, MenuScene, GameScene],
