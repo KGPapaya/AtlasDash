@@ -1,7 +1,15 @@
 /* global Phaser */
 import { LEVELS } from '../levels.js';
 import { audio } from '../audio.js';
-import { BASE_W, BASE_H, SS } from '../config.js';
+import { BASE_W, BASE_H, SS_LADDER, getSS, setSS, isCalibrated, setCalibrated } from '../config.js';
+
+// Adaptive supersample probe thresholds. Promote (sharper) only while comfortably
+// above PROMOTE; demote (safety net, always on) the moment we sit below DEMOTE. The
+// gap is hysteresis so it never oscillates. PROBE_WINDOW frames of actual gameplay are
+// averaged per decision (~2.5s at 60fps) so a single hitch never flips the tier.
+const FPS_PROMOTE = 58;
+const FPS_DEMOTE = 50;
+const PROBE_WINDOW = 150;
 
 const PLAYER_X = 160;
 const PLAYER_SIZE = 40;
@@ -110,11 +118,13 @@ export class GameScene extends Phaser.Scene {
     this.prevBottom = this.groundTop;
     this.prevTop = this.groundTop - PLAYER_SIZE;
     this.accent = this.cfg.accent || COLOR_BAR;
-    this.textRes = SS; // rasterize HUD/banner text at backing density so it stays crisp
+    this.textRes = getSS(); // rasterize HUD/banner text at backing density so it stays crisp
 
-    // Supersample: render the 960x540 world across the high-res backing store.
-    this.cameras.main.setZoom(SS);
+    // Adaptive supersample: render the 960x540 world across the current backing store.
+    this.cameras.main.setZoom(getSS());
     this.cameras.main.centerOn(BASE_W / 2, BASE_H / 2);
+    this._fpsFrames = 0;
+    this._fpsAccum = 0;
 
     this.buildBackdrop(width, height);
 
@@ -336,10 +346,53 @@ export class GameScene extends Phaser.Scene {
           if (this.tryJump()) this.jumpBufferUntil = 0;
         }
         this.scrollDecor(Math.min(delta, MAX_CATCHUP));
+        this.perfProbe();
       }
     } else if (justPressed) {
       this.handleMenuPress();
     }
+  }
+
+  // Adaptive resolution: average real in-game FPS over a window, then step the
+  // supersample up (sharper) only while the device sustains a smooth rate, or down
+  // (safety) if it drops. Promotion stops once calibrated; demotion stays armed so a
+  // stored tier that turns out too heavy still self-corrects. Cheap: a counter + a
+  // periodic average, no per-frame allocation.
+  perfProbe() {
+    const fps = this.game.loop.actualFps;
+    if (!isFinite(fps) || fps <= 0) return;
+    this._fpsFrames++;
+    this._fpsAccum += fps;
+    if (this._fpsFrames < PROBE_WINDOW) return;
+    const avg = this._fpsAccum / this._fpsFrames;
+    this._fpsFrames = 0;
+    this._fpsAccum = 0;
+
+    const idx = SS_LADDER.indexOf(getSS());
+    if (avg < FPS_DEMOTE && idx > 0) {
+      this.applySS(SS_LADDER[idx - 1]); // struggling: drop a tier
+      setCalibrated(true); // the tier below this is the ceiling
+    } else if (!isCalibrated() && avg >= FPS_PROMOTE && idx < SS_LADDER.length - 1) {
+      this.applySS(SS_LADDER[idx + 1]); // headroom: try sharper, re-measure next window
+    } else if (!isCalibrated()) {
+      setCalibrated(true); // stable at the current tier: lock it in
+    }
+  }
+
+  // Switch the live backing-store resolution. World coordinates are unchanged; only the
+  // canvas size, camera zoom, and text rasterization density move. One-time cost during
+  // calibration, then persisted.
+  applySS(ss) {
+    setSS(ss);
+    this.scale.setGameSize(BASE_W * ss, BASE_H * ss);
+    this.cameras.main.setZoom(ss);
+    this.cameras.main.centerOn(BASE_W / 2, BASE_H / 2);
+    this.textRes = ss;
+    for (const t of [this.attemptLabel, this.levelLabel, this.percentLabel, this.banner]) {
+      if (t) t.setResolution(ss);
+    }
+    this._fpsFrames = 0; // re-measure cleanly at the new tier
+    this._fpsAccum = 0;
   }
 
   // Snapshot the interpolated quantities BEFORE a physics step so present() can render

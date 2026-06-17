@@ -1,7 +1,7 @@
 /* global Phaser */
 import { LEVELS } from '../levels.js';
 import { audio } from '../audio.js';
-import { BASE_W, BASE_H, SS } from '../config.js';
+import { BASE_W, BASE_H, getSS } from '../config.js';
 
 const COLOR_BG = 0x0b0b16;
 const COLOR_TITLE = 0x2ee6ff;
@@ -25,10 +25,10 @@ export class MenuScene extends Phaser.Scene {
     this.selecting = false;
     this.selIndex = 0;
     this.cards = [];
-    this.textRes = SS; // crisp text on the supersampled backing store
+    this.textRes = getSS(); // crisp text on the current backing store
 
-    // Supersample: render the 960x540 world across the high-res backing store.
-    this.cameras.main.setZoom(SS);
+    // Render the 960x540 world across the current (adaptively calibrated) backing store.
+    this.cameras.main.setZoom(getSS());
     this.cameras.main.centerOn(BASE_W / 2, BASE_H / 2);
 
     const sky = this.add.graphics().setDepth(-30);
